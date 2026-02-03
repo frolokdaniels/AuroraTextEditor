@@ -1,0 +1,2402 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Aurora Text Editor</title>
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%231a1a1a%22/><text x=%2250%%22 y=%2255%%22 dominant-baseline=%22central%22 text-anchor=%22middle%22 fill=%22%23e0e0e0%22 font-family=%22-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif%22 font-size=%2242%22 font-weight=%22800%22>A</text></svg>">
+    <script src="https://unpkg.com/docx@7.1.0/build/index.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        /* === CSS ПЕРЕМЕННЫЕ === */
+        :root {
+            --bg-current: linear-gradient(135deg, #134E5E 0%, #71B280 100%);
+            --move-x: 0px;
+            --move-y: 0px;
+            --blur-amount: 0px;
+            --text-color: #e0e0e0;
+            --textarea-bg: rgba(0, 0, 0, 0.5);
+            --caret-color: #fff;
+            --sidebar-bg: rgba(20, 20, 20, 0.4);
+            --sidebar-blur: 20px;
+            --sidebar-width: 300px;
+            --ach-sidebar-width: 320px;
+            --btn-bg: rgba(255, 255, 255, 0.08);
+            --btn-border: rgba(255, 255, 255, 0.1);
+            --btn-text: #ddd;
+            --btn-hover: rgba(255, 255, 255, 0.2);
+            --range-track: rgba(255, 255, 255, 0.2);
+            --range-thumb: #fff;
+            --divider: rgba(255, 255, 255, 0.1);
+            --error-color: #FF6B6B;
+            --accent-color: #00C6FF;
+            --gold-color: #FFD700;
+            --save-color: #00FF9D;
+
+            --content-width: 720px;
+            --content-width: 720px;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            --editor-font: 'Courier New', Courier, monospace;
+            --font-size: 19px;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            font-family: var(--font-family);
+            position: relative;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: var(--bg-current);
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            filter: blur(var(--blur-amount));
+            transform: translate(var(--move-x), var(--move-y)) scale(1.05);
+            transition: transform 0.1s ease-out, background 0.5s ease;
+        }
+
+        /* === CRT EFFECT STYLES === */
+        .crt-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 9998;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+        }
+
+        .crt-overlay::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: rgba(18, 16, 16, 0.1);
+            opacity: 0;
+            z-index: 2;
+            pointer-events: none;
+            animation: flicker 0.15s infinite;
+        }
+
+        .crt-vignette {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 9998;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s;
+            background: radial-gradient(circle, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, 0.45) 100%);
+        }
+
+        body.crt-active .crt-overlay,
+        body.crt-active .crt-vignette {
+            opacity: 1;
+        }
+
+        body.crt-active .crt-overlay::after {
+            opacity: 1;
+        }
+
+        body.crt-active #editor {
+            text-shadow: 2px 0px 2px rgba(255, 0, 0, 0.3), -2px 0px 2px rgba(0, 0, 255, 0.3), 0 0 8px rgba(255, 255, 255, 0.4);
+        }
+
+        @keyframes flicker {
+            0% {
+                opacity: 0.02;
+            }
+
+            50% {
+                opacity: 0.05;
+            }
+
+            100% {
+                opacity: 0.02;
+            }
+        }
+
+        /* === SPLASH SCREEN === */
+        #splash-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #080808;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 2s ease-in-out, visibility 2s;
+        }
+
+        #splash-screen.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .logo-text {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 4rem;
+            font-weight: 800;
+            letter-spacing: 8px;
+            text-transform: uppercase;
+            color: #E0E0E0;
+            text-shadow: 0 0 25px rgba(255, 255, 255, 0.15);
+            transition: opacity 0.5s ease;
+            text-align: center;
+        }
+
+        .logo-subtext {
+            margin-top: 15px;
+            font-family: sans-serif;
+            font-size: 11px;
+            letter-spacing: 4px;
+            color: rgba(255, 255, 255, 0.3);
+            text-transform: uppercase;
+        }
+
+        .loading-bar-container {
+            width: 200px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            margin-top: 50px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .loading-bar {
+            width: 0%;
+            height: 100%;
+            background: #E0E0E0;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+            transition: width 1.5s ease-in-out;
+        }
+
+        /* === TOUR === */
+        #tour-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 9000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+        }
+
+        #tour-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        @keyframes pulse-highlight {
+            0% {
+                box-shadow: 0 0 0 4px var(--accent-color), 0 0 20px rgba(0, 198, 255, 0.4);
+            }
+
+            50% {
+                box-shadow: 0 0 0 8px var(--accent-color), 0 0 50px rgba(0, 198, 255, 0.8);
+            }
+
+            100% {
+                box-shadow: 0 0 0 4px var(--accent-color), 0 0 20px rgba(0, 198, 255, 0.4);
+            }
+        }
+
+        .tour-highlight {
+            z-index: 9002 !important;
+            position: relative;
+            animation: pulse-highlight 2s infinite ease-in-out;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.5);
+            transition: box-shadow 0.3s ease;
+        }
+
+        #tour-tooltip {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            z-index: 9003;
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 20px;
+            border-radius: 16px;
+            width: 300px;
+            max-width: 90vw;
+            color: #fff;
+            box-shadow: 0 10px 50px rgba(0, 0, 0, 0.8);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            text-align: center;
+        }
+
+        #tour-tooltip.active {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .tour-content h3 {
+            margin: 0 0 8px 0;
+            font-size: 17px;
+            color: var(--accent-color);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 700;
+        }
+
+        .tour-content p {
+            margin: 0 0 20px 0;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #ccc;
+        }
+
+        .tour-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .tour-steps {
+            font-size: 12px;
+            color: #777;
+            font-weight: 500;
+        }
+
+        .tour-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: 0.2s;
+        }
+
+        .tour-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .tour-btn.primary {
+            background: var(--accent-color);
+            color: #000;
+            border: none;
+            font-weight: 700;
+        }
+
+        /* === SCROLLBAR === */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(150, 150, 150, 0.3);
+            border-radius: 10px;
+            transition: background 0.2s;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(150, 150, 150, 0.6);
+        }
+
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(150, 150, 150, 0.3) transparent;
+        }
+
+        /* === CUSTOM MODAL === */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+            z-index: 10000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-content {
+            background: rgba(30, 30, 30, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            padding: 25px;
+            border-radius: 16px;
+            width: 320px;
+            max-width: 90%;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            transform: scale(0.9);
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            text-align: center;
+        }
+
+        .modal-overlay.active .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-content h3 {
+            margin: 0 0 10px 0;
+            color: var(--gold-color);
+            font-size: 18px;
+            letter-spacing: 0.5px;
+        }
+
+        .modal-content p {
+            margin: 0 0 20px 0;
+            color: #ccc;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .modal-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .modal-btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
+            transition: 0.2s;
+            min-width: 80px;
+        }
+
+        .modal-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .modal-btn.primary {
+            background: var(--accent-color);
+            color: #000;
+            border: none;
+            font-weight: 600;
+        }
+
+        .modal-btn.primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .modal-btn.danger {
+            background: rgba(255, 107, 107, 0.2);
+            border-color: rgba(255, 107, 107, 0.5);
+            color: #ffadad;
+        }
+
+        .modal-btn.danger:hover {
+            background: rgba(255, 107, 107, 0.3);
+        }
+
+        /* === UI STYLES === */
+        .icon {
+            width: 18px;
+            height: 18px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /* SETTINGS BUTTON (LEFT) */
+        #gearBtn {
+            position: fixed;
+            top: 50%;
+            left: 0;
+            transform: translateY(-50%);
+            z-index: 200;
+            width: 36px;
+            height: 64px;
+            border-radius: 0 12px 12px 0;
+            border: 1px solid var(--btn-border);
+            border-left: none;
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(var(--sidebar-blur));
+            -webkit-backdrop-filter: blur(var(--sidebar-blur));
+            color: var(--btn-text);
+            cursor: pointer;
+            opacity: 0.5;
+            box-shadow: 2px 0 15px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: left 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.2s, width 0.2s;
+        }
+
+        #gearBtn:hover {
+            opacity: 1;
+            background: var(--btn-hover);
+            width: 44px;
+        }
+
+        #gearBtn.moved {
+            left: var(--sidebar-width);
+            opacity: 1;
+        }
+
+        /* ACHIEVEMENTS BUTTON (RIGHT) */
+        #achievementsBtn {
+            position: fixed;
+            top: 50%;
+            right: 0;
+            transform: translateY(-50%);
+            z-index: 200;
+            width: 36px;
+            height: 64px;
+            border-radius: 12px 0 0 12px;
+            border: 1px solid var(--btn-border);
+            border-right: none;
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(var(--sidebar-blur));
+            -webkit-backdrop-filter: blur(var(--sidebar-blur));
+            color: var(--gold-color);
+            cursor: pointer;
+            opacity: 0.5;
+            box-shadow: -2px 0 15px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: right 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.2s, width 0.2s;
+        }
+
+        #achievementsBtn:hover {
+            opacity: 1;
+            background: var(--btn-hover);
+            width: 44px;
+        }
+
+        #achievementsBtn.moved {
+            right: var(--ach-sidebar-width);
+            opacity: 1;
+        }
+
+        /* FULLSCREEN BUTTON */
+        #fsBtn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 300;
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            border: 1px solid var(--btn-border);
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(var(--sidebar-blur));
+            -webkit-backdrop-filter: blur(var(--sidebar-blur));
+            color: var(--btn-text);
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0.4;
+            transition: right 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.2s;
+        }
+
+        #fsBtn:hover {
+            opacity: 1;
+            background: var(--btn-hover);
+        }
+
+        /* Класс для сдвига кнопки полного экрана */
+        #fsBtn.moved-left {
+            right: 340px;
+            /* 320px sidebar + 20px padding */
+            opacity: 1;
+        }
+
+        /* SETTINGS SIDEBAR (LEFT) */
+        #sidebar {
+            position: fixed;
+            top: 0;
+            left: calc(var(--sidebar-width) * -1);
+            width: var(--sidebar-width);
+            height: 100vh;
+            background-color: var(--sidebar-bg);
+            backdrop-filter: blur(var(--sidebar-blur));
+            -webkit-backdrop-filter: blur(var(--sidebar-blur));
+            border-right: 1px solid var(--btn-border);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            padding: 30px 20px;
+            box-sizing: border-box;
+            transition: left 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+            z-index: 150;
+            box-shadow: 10px 0 30px rgba(0, 0, 0, 0.15);
+            overflow-y: auto;
+            max-width: 85vw;
+        }
+
+        #sidebar.active {
+            left: 0;
+        }
+
+        #sidebar.tour-mode-active {
+            padding-bottom: 250px !important;
+        }
+
+        /* ACHIEVEMENTS SIDEBAR (RIGHT) */
+        #achievements-sidebar {
+            position: fixed;
+            top: 0;
+            right: calc(var(--ach-sidebar-width) * -1);
+            width: var(--ach-sidebar-width);
+            height: 100vh;
+            background-color: var(--sidebar-bg);
+            backdrop-filter: blur(var(--sidebar-blur));
+            -webkit-backdrop-filter: blur(var(--sidebar-blur));
+            border-left: 1px solid var(--btn-border);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            padding: 30px 20px;
+            box-sizing: border-box;
+            transition: right 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+            z-index: 350;
+            box-shadow: -10px 0 30px rgba(0, 0, 0, 0.15);
+            overflow-y: auto;
+            max-width: 85vw;
+            font-family: sans-serif;
+        }
+
+        #achievements-sidebar.active {
+            right: 0;
+        }
+
+        .sidebar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            border-bottom: 1px solid var(--divider);
+            padding-bottom: 10px;
+        }
+
+        .sidebar-header h2 {
+            margin: 0;
+            font-size: 1.2rem;
+            color: var(--gold-color);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            font-size: 14px;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 24px;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: 0.2s;
+        }
+
+        .close-btn:hover {
+            opacity: 1;
+        }
+
+        /* ACHIEVEMENT CARDS */
+        .achievement-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--btn-border);
+            border-radius: 10px;
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            opacity: 0.4;
+            filter: grayscale(100%);
+            transition: all 0.4s ease;
+        }
+
+        .achievement-card.unlocked {
+            opacity: 1;
+            filter: grayscale(0%);
+            border-color: rgba(255, 215, 0, 0.5);
+            background: linear-gradient(145deg, rgba(42, 42, 42, 0.5), rgba(56, 49, 0, 0.5));
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .achievement-icon {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 32px;
+        }
+
+        .achievement-icon svg {
+            width: 24px;
+            height: 24px;
+            stroke: #aaa;
+            transition: stroke 0.4s ease, filter 0.4s ease;
+        }
+
+        .achievement-card.unlocked .achievement-icon svg {
+            stroke: var(--gold-color);
+            filter: drop-shadow(0 0 5px rgba(255, 215, 0, 0.5));
+        }
+
+        .achievement-info h4 {
+            margin: 0 0 4px 0;
+            font-size: 13px;
+            color: #fff;
+        }
+
+        .achievement-info p {
+            margin: 0;
+            font-size: 11px;
+            color: #aaa;
+            line-height: 1.4;
+        }
+
+        /* TOAST NOTIFICATIONS */
+        #toast-container {
+            position: fixed;
+            bottom: 60px;
+            right: 20px;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: #1e1e1e;
+            color: #fff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            border-left: 5px solid var(--gold-color);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            min-width: 250px;
+            animation: slideIn 0.5s ease, fadeOut 0.5s ease 3.5s forwards;
+            font-family: sans-serif;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .toast-icon {
+            font-size: 24px;
+        }
+
+        .toast-icon svg {
+            stroke: var(--gold-color);
+            width: 24px;
+            height: 24px;
+        }
+
+        .toast-content h4 {
+            margin: 0;
+            font-size: 14px;
+            color: var(--gold-color);
+        }
+
+        .toast-content p {
+            margin: 2px 0 0;
+            font-size: 12px;
+            color: #ccc;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+        }
+
+        /* GENERAL SIDEBAR ELEMENTS */
+        .sb-section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--divider);
+        }
+
+        .sb-title {
+            font-family: sans-serif;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--btn-text);
+            opacity: 0.5;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        #docTitleInput {
+            width: 100%;
+            padding: 10px;
+            background: var(--btn-bg);
+            border: 1px solid var(--btn-border);
+            border-radius: 8px;
+            color: var(--btn-text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 13px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            outline: none;
+            transition: 0.2s;
+        }
+
+        #docTitleInput:focus {
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        #docTitleInput.error {
+            border-color: var(--error-color);
+            color: var(--error-color);
+            animation: shake 0.3s;
+        }
+
+        #docTitleInput::placeholder {
+            color: var(--btn-text);
+            opacity: 0.4;
+        }
+
+        @keyframes shake {
+            0% {
+                transform: translateX(0);
+            }
+
+            25% {
+                transform: translateX(-5px);
+            }
+
+            50% {
+                transform: translateX(5px);
+            }
+
+            75% {
+                transform: translateX(-5px);
+            }
+
+            100% {
+                transform: translateX(0);
+            }
+        }
+
+        button.sb-btn {
+            flex: 1;
+            padding: 12px;
+            cursor: pointer;
+            background-color: var(--btn-bg);
+            color: var(--btn-text);
+            border: 1px solid var(--btn-border);
+            border-radius: 8px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: 0.2s;
+        }
+
+        button.sb-btn:hover {
+            background-color: var(--btn-hover);
+            transform: translateY(-2px);
+            border-color: rgba(255, 255, 255, 0.5);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+
+        button.sb-btn.active {
+            background-color: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+
+        button.sb-btn.danger {
+            border-color: rgba(255, 107, 107, 0.3);
+            color: #ffadad;
+            margin-top: 20px;
+        }
+
+        button.sb-btn.danger:hover {
+            background-color: rgba(255, 107, 107, 0.1);
+            border-color: rgba(255, 107, 107, 0.6);
+        }
+
+        .range-wrap {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--btn-text);
+            font-size: 14px;
+        }
+
+        input[type=range] {
+            flex-grow: 1;
+            -webkit-appearance: none;
+            height: 4px;
+            background: var(--range-track);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: var(--range-thumb);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: 0.2s;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        textarea {
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            border: none;
+            outline: none;
+            resize: none;
+            background-color: var(--textarea-bg);
+            color: var(--text-color);
+            caret-color: var(--caret-color);
+            font-family: var(--font-family);
+            font-size: var(--font-size);
+            line-height: 1.7;
+            text-align: left;
+            padding: 80px max(20px, calc(50vw - (var(--content-width) / 2)));
+            transition: background-color 0.5s, color 0.5s, font-size 0.3s;
+        }
+
+        .color-palette {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+            margin-top: 15px;
+            margin-bottom: 25px;
+            justify-items: center;
+        }
+
+        .color-btn {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            padding: 0;
+            box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.1), 0 4px 10px rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+            background-repeat: no-repeat;
+        }
+
+        .color-btn:hover {
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5), 0 8px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .color-btn:active {
+            transform: translateY(-1px) scale(0.98);
+        }
+
+        /* Shine gradient combined with color gradient */
+        .color-btn.g1 {
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.15), transparent), linear-gradient(135deg, #1e2024 0%, #23272b 100%);
+        }
+
+        .color-btn.g2 {
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.15), transparent), linear-gradient(135deg, #09203f 0%, #537895 100%);
+        }
+
+        .color-btn.g3 {
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.15), transparent), linear-gradient(135deg, #134E5E 0%, #71B280 100%);
+        }
+
+        .color-btn.g4 {
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.15), transparent), linear-gradient(135deg, #4A00E0 0%, #8E2DE2 100%);
+        }
+
+        .rainbow-wrapper {
+            position: relative;
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            background: conic-gradient(red, orange, yellow, green, blue, indigo, violet, red);
+            box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.1), 0 4px 10px rgba(0, 0, 0, 0.3);
+            border: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .rainbow-wrapper:hover {
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5), 0 8px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .rainbow-icon {
+            pointer-events: none;
+            width: 14px;
+            height: 14px;
+            color: white;
+            filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+        }
+
+        input[type="color"] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            padding-top: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 11px;
+            text-align: center;
+            color: var(--btn-text);
+            opacity: 0.5;
+            line-height: 1.6;
+            letter-spacing: 0.5px;
+        }
+
+        .sidebar-footer a {
+            color: inherit;
+            text-decoration: none;
+            border-bottom: 1px dotted rgba(255, 255, 255, 0.3);
+            transition: 0.2s;
+        }
+
+        .sidebar-footer a:hover {
+            opacity: 1;
+            border-bottom-style: solid;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        /* === BOTTOM PANEL === */
+        #bottom-panel {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 300;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            pointer-events: none;
+        }
+
+        #stats-bar {
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(var(--sidebar-blur));
+            -webkit-backdrop-filter: blur(var(--sidebar-blur));
+            border: 1px solid var(--btn-border);
+            border-radius: 8px;
+            padding: 8px 15px;
+            color: var(--btn-text);
+            font-size: 12px;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            gap: 12px;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            user-select: none;
+        }
+
+        #bottom-panel:hover #stats-bar {
+            opacity: 1;
+        }
+
+        .stat-item {
+            white-space: nowrap;
+        }
+
+        .stat-divider {
+            opacity: 0.3;
+        }
+
+        #save-icon {
+            color: var(--save-color);
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: none;
+            border: none;
+            padding: 0;
+        }
+
+        #save-icon.visible {
+            opacity: 1;
+        }
+
+        @media (max-width: 768px) {
+            .logo-text {
+                font-size: 2.5rem;
+            }
+
+            textarea {
+                padding: 80px 20px !important;
+                font-size: 16px;
+            }
+
+            #gearBtn {
+                width: 44px;
+                height: 54px;
+            }
+
+            #achievementsBtn {
+                width: 44px;
+                height: 54px;
+            }
+
+            #stats-bar {
+                font-size: 10px;
+                padding: 6px 10px;
+                gap: 8px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="crt-overlay"></div>
+    <div class="crt-vignette"></div>
+
+    <div id="splash-screen">
+        <div class="logo-text">AURORA</div>
+        <div class="logo-subtext">text editor</div>
+        <div class="loading-bar-container">
+            <div class="loading-bar" id="loadingBar"></div>
+        </div>
+    </div>
+
+    <div id="tour-overlay"></div>
+    <div id="tour-tooltip">
+        <div class="tour-content">
+            <h3 id="tour-title">Заголовок</h3>
+            <p id="tour-desc">Описание шага.</p>
+        </div>
+        <div class="tour-controls">
+            <span class="tour-steps" id="tour-counter">1 / 5</span>
+            <div style="display:flex; gap:10px;">
+                <button class="tour-btn" onclick="endTour()">Закрыть</button>
+                <button class="tour-btn primary" onclick="nextTourStep()">Далее</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <button id="gearBtn" onclick="toggleSidebar()"><svg class="icon" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+            </path>
+        </svg></button>
+
+    <button id="achievementsBtn" onclick="toggleAchievements()" title="Мои достижения">
+        <svg class="icon" viewBox="0 0 24 24">
+            <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+            <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+            <path d="M4 22h16"></path>
+            <path d="M12 15a7 7 0 0 0 7-7V3H5v5a7 7 0 0 0 7 7z"></path>
+            <line x1="12" y1="15" x2="12" y2="22"></line>
+        </svg>
+    </button>
+
+    <button id="fsBtn" onclick="toggleFullScreen()" title="На весь экран"><svg class="icon" viewBox="0 0 24 24">
+            <path d="M15 3h6v6"></path>
+            <path d="M9 21H3v-6"></path>
+            <path d="M21 3l-7 7"></path>
+            <path d="M3 21l7-7"></path>
+        </svg></button>
+
+    <div id="bottom-panel">
+        <div id="save-icon">
+            <svg class="icon" style="width:20px; height:20px;" viewBox="0 0 24 24">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+        </div>
+        <div id="stats-bar">
+            <span class="stat-item" id="wordCount">0 слов</span>
+            <span class="stat-divider">|</span>
+            <span class="stat-item" id="charCount">0 зн.</span>
+            <span class="stat-divider">|</span>
+            <span class="stat-item" id="charNoSpaceCount">0 зн. б/п</span>
+            <span class="stat-divider">|</span>
+            <span class="stat-item" id="sheetCount">0 а.л.</span>
+        </div>
+    </div>
+
+    <div id="sidebar">
+        <div class="sb-section">
+            <div class="sb-title" data-i18n="settings_lang">Язык / Language</div>
+            <div class="btn-row">
+                <button class="sb-btn toggle-btn" id="btn-ru" onclick="setLanguage('ru')">RU</button>
+                <button class="sb-btn toggle-btn" id="btn-en" onclick="setLanguage('en')">EN</button>
+            </div>
+        </div>
+
+        <div class="sb-section">
+            <div class="sb-title" data-i18n="sidebar_file">Файл</div>
+            <input type="text" id="docTitleInput" placeholder="Название документа..." spellcheck="false"
+                autocomplete="off" data-i18n-placeholder="ph_doc_title">
+            <button class="sb-btn" onclick="document.getElementById('txtInput').click()"><svg class="icon"
+                    viewBox="0 0 24 24">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg><span data-i18n="btn_open">Открыть</span></button>
+            <div class="btn-row">
+                <button class="sb-btn" onclick="saveFile()"><svg class="icon" viewBox="0 0 24 24">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                        <polyline points="7 3 7 8 15 8"></polyline>
+                    </svg><span data-i18n="btn_save_txt">TXT</span></button>
+                <button class="sb-btn" onclick="saveDocx()" style="border-color: rgba(60, 100, 255, 0.3);"><svg
+                        class="icon" viewBox="0 0 24 24">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg><span data-i18n="btn_save_docx">DOCX</span></button>
+                <button class="sb-btn" onclick="savePDF()" style="border-color: rgba(255, 60, 60, 0.3);"><svg
+                        class="icon" viewBox="0 0 24 24">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg><span data-i18n="btn_save_pdf">PDF</span></button>
+            </div>
+            <button class="sb-btn" onclick="clearText()"
+                style="border-color: rgba(255,100,100,0.3); color: #ffadad;"><svg class="icon" style="stroke: #ffadad;"
+                    viewBox="0 0 24 24">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg><span data-i18n="btn_clear">Очистить</span></button>
+        </div>
+
+        <div class="sb-section">
+            <div class="sb-title" data-i18n="sidebar_text">Текст</div>
+            <div class="btn-row">
+                <button class="sb-btn" onclick="document.getElementById('fontInput').click()"><svg class="icon"
+                        viewBox="0 0 24 24">
+                        <path d="M4 7V4h16v3M9 20h6M12 4v16"></path>
+                    </svg><span data-i18n="btn_font">Шрифт</span></button>
+                <button class="sb-btn" onclick="resetFont()" style="flex: 0.4;" title="Сбросить шрифт"><svg class="icon"
+                        viewBox="0 0 24 24">
+                        <path d="M2.5 2v6h6M21.5 22v-6h-6"></path>
+                        <path d="M22 11.5A10 10 0 0 0 3.2 7.2M2 12.5a10 10 0 0 0 18.8 4.2"></path>
+                    </svg></button>
+            </div>
+
+            <div style="margin-top: 10px; font-size: 11px; opacity: 0.6; color: var(--btn-text);"
+                data-i18n="label_line_width">Ширина строки:</div>
+            <div class="range-wrap">
+                <svg class="icon" style="width:14px; height:14px;" viewBox="0 0 24 24">
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <polyline points="9 21 3 21 3 15"></polyline>
+                    <line x1="21" y1="3" x2="14" y2="10"></line>
+                    <line x1="3" y1="21" x2="10" y2="14"></line>
+                </svg>
+                <input type="range" id="widthRange" min="300" max="1200" step="10" value="720">
+            </div>
+
+            <div style="margin-top: 10px; font-size: 11px; opacity: 0.6; color: var(--btn-text);"
+                data-i18n="label_font_size">Размер шрифта:</div>
+            <div class="range-wrap">
+                <svg class="icon" style="width:14px; height:14px;" viewBox="0 0 24 24">
+                    <path d="M4 7V4h16v3M9 20h6M12 4v16"></path>
+                </svg>
+                <input type="range" id="fontSizeRange" min="12" max="60" step="1" value="19">
+            </div>
+        </div>
+
+        <div class="sb-section">
+            <div class="sb-title" data-i18n="sidebar_appearance">Внешний вид</div>
+
+            <div style="font-size: 11px; opacity: 0.6; color: var(--btn-text);" data-i18n="label_atmosphere">Атмосфера:
+            </div>
+            <div class="color-palette">
+                <button class="color-btn g1"
+                    onclick="setSolidBackground('linear-gradient(135deg, #1e2024 0%, #23272b 100%)')"
+                    title="Ночь"></button>
+                <button class="color-btn g2"
+                    onclick="setSolidBackground('linear-gradient(135deg, #09203f 0%, #537895 100%)')"
+                    title="Океан"></button>
+                <button class="color-btn g3"
+                    onclick="setSolidBackground('linear-gradient(135deg, #134E5E 0%, #71B280 100%)')"
+                    title="Природа"></button>
+                <button class="color-btn g4"
+                    onclick="setSolidBackground('linear-gradient(135deg, #4A00E0 0%, #8E2DE2 100%)')"
+                    title="Мистика"></button>
+
+                <div class="rainbow-wrapper" title="Свой цвет">
+                    <svg class="icon rainbow-icon" viewBox="0 0 24 24">
+                        <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+                        <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+                        <path d="M2 2l7.586 7.586"></path>
+                        <circle cx="11" cy="11" r="2"></circle>
+                    </svg>
+                    <input type="color" id="colorPicker" value="#ffffff" oninput="setSolidBackground(this.value)">
+                </div>
+            </div>
+
+            <div class="btn-row" style="margin-top: 10px;">
+                <button class="sb-btn" onclick="document.getElementById('bgInput').click()"><svg class="icon"
+                        viewBox="0 0 24 24">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg><span data-i18n="btn_photo">Фото</span></button>
+            </div>
+
+            <div class="btn-row" style="margin-top: 10px;">
+                <button class="sb-btn active" id="parallaxBtn" onclick="toggleParallax()">
+                    <svg class="icon" viewBox="0 0 24 24">
+                        <polyline points="1 4 1 10 7 10"></polyline>
+                        <polyline points="23 20 23 14 17 14"></polyline>
+                        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path>
+                    </svg>
+                    <span id="parallaxText">Параллакс: Вкл</span>
+                </button>
+            </div>
+
+            <div class="btn-row" style="margin-top: 10px;">
+                <button class="sb-btn" id="crtBtn" onclick="toggleCRT()">
+                    <svg class="icon" viewBox="0 0 24 24">
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                        <line x1="8" y1="21" x2="16" y2="21"></line>
+                        <line x1="12" y1="17" x2="12" y2="21"></line>
+                    </svg>
+                    <span id="crtText">CRT Эффект</span>
+                </button>
+            </div>
+
+            <div style="margin-top: 10px; font-size: 11px; opacity: 0.6; color: var(--btn-text);"
+                data-i18n="label_blur">Размытие:</div>
+            <div class="range-wrap"><svg class="icon" style="width:14px; height:14px;" viewBox="0 0 24 24">
+                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+                </svg><input type="range" id="blurRange" min="0" max="20" step="0.5" value="0"></div>
+        </div>
+
+        <div class="sb-section" style="border-bottom: none;">
+            <div class="sb-title" data-i18n="sidebar_audio">Аудио</div><button class="sb-btn" onclick="toggleSound()"
+                id="soundBtn"><svg class="icon" viewBox="0 0 24 24">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>Звук: Вкл</button>
+            <div class="btn-row"><button class="sb-btn" onclick="document.getElementById('soundInput').click()"><svg
+                        class="icon" viewBox="0 0 24 24">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                    </svg><span data-i18n="btn_custom_sound">Свой</span></button><button class="sb-btn"
+                    onclick="resetCustomSound()" style="flex: 0.4;"><svg class="icon" viewBox="0 0 24 24">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg></button></div>
+            <div style="margin-top: 10px; font-size: 11px; opacity: 0.6; color: var(--btn-text);"
+                data-i18n="label_volume">Громкость:</div>
+            <div class="range-wrap"><input type="range" id="volRange" min="0" max="1" step="0.05" value="0.5"></div>
+        </div>
+
+        <button class="sb-btn danger" onclick="resetApp()">
+            <svg class="icon" viewBox="0 0 24 24">
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                <line x1="12" y1="2" x2="12" y2="12"></line>
+            </svg>
+            <span data-i18n="btn_reset">Забыть меня</span>
+        </button>
+
+        <div class="sidebar-footer">
+            <span data-i18n="footer_made_by">Made by Danila Sudaev</span><br>
+            <a href="https://t.me/sudaev_pishet" target="_blank" id="tg-link">t.me/sudaev_pishet</a>
+        </div>
+    </div>
+
+    <div id="achievements-sidebar">
+        <div class="sidebar-header">
+            <h2 data-i18n="sidebar_achievements">Мой прогресс</h2>
+            <button id="close-achievements" onclick="toggleAchievements()" class="close-btn">&times;</button>
+        </div>
+        <div class="achievements-list" id="achievements-list">
+        </div>
+    </div>
+
+    <input type="file" id="txtInput" accept=".txt, .docx">
+    <input type="file" id="bgInput" accept="image/*">
+    <input type="file" id="soundInput" accept="audio/*">
+    <input type="file" id="fontInput" accept=".ttf, .otf, .woff, .woff2">
+
+    <div id="editor" contenteditable="true" spellcheck="false" placeholder="Начните писать..."
+        data-i18n-placeholder="ph_editor"></div>
+
+    <style>
+        /* Typing Animation */
+        @keyframes charFadeIn {
+            0% {
+                color: rgba(255, 255, 255, 0.2);
+                text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+            }
+
+            100% {
+                color: var(--text-color);
+                text-shadow: none;
+            }
+        }
+
+        .char-anim {
+            animation: charFadeIn 0.3s ease-out forwards;
+        }
+
+        /* Editor Div Styles */
+        #editor {
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            border: none;
+            outline: none;
+            resize: none;
+            background-color: var(--textarea-bg);
+            color: var(--text-color);
+            caret-color: var(--caret-color);
+            background-color: var(--textarea-bg);
+            color: var(--text-color);
+            caret-color: var(--caret-color);
+            font-family: var(--editor-font);
+            font-size: var(--font-size);
+            font-size: var(--font-size);
+            line-height: 1.7;
+            text-align: left;
+            padding: 80px max(20px, calc(50vw - (var(--content-width) / 2)));
+            transition: background-color 0.5s, color 0.5s, font-size 0.3s;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            /* Preserve whitespace */
+        }
+    </style>
+
+    <!-- CUSTOM MODAL -->
+    <div id="custom-modal-overlay" class="modal-overlay">
+        <div class="modal-content">
+            <h3 id="modal-title">Title</h3>
+            <p id="modal-message">Message</p>
+            <div id="modal-buttons" class="modal-buttons">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const editor = document.getElementById('editor');
+
+        // === TRANSLATIONS ===
+        const translations = {
+            ru: {
+                // UI Static
+                settings_lang: "Язык / Language",
+                sidebar_file: "Файл",
+                sidebar_text: "Текст",
+                sidebar_appearance: "Внешний вид",
+                sidebar_audio: "Аудио",
+
+                btn_open: "Открыть",
+                btn_save_txt: "TXT",
+                btn_save_docx: "DOCX",
+                btn_save_pdf: "PDF",
+                btn_clear: "Очистить",
+                btn_font: "Шрифт",
+
+                label_line_width: "Ширина строки:",
+                label_font_size: "Размер шрифта:",
+                label_atmosphere: "Атмосфера:",
+                label_blur: "Размытие:",
+                label_volume: "Громкость:",
+
+                btn_photo: "Фото",
+                btn_parallax_on: "Параллакс: Вкл",
+                btn_parallax_off: "Параллакс: Выкл",
+                btn_crt: "CRT Эффект",
+                btn_sound_on: "Звук: Вкл",
+                btn_sound_off: "Звук: Выкл",
+                btn_custom_sound: "Свой",
+
+                btn_reset: "Забыть меня",
+                footer_made_by: "Made by Danila Sudaev",
+
+                sidebar_achievements: "Мой прогресс",
+
+                // Placeholders
+                ph_doc_title: "Название документа...",
+                ph_editor: "Начните писать...",
+
+                // Stats
+                stat_words: "слов",
+                stat_chars: "зн.",
+                stat_chars_ns: "зн. б/п",
+                stat_sheets: "а.л.",
+
+                // Modals
+                modal_font_title: "Шрифт",
+                modal_font_success: "Ваш шрифт успешно установлен!",
+                modal_font_storage_limit: "Шрифт установлен, но он слишком большой для сохранения в браузере. После перезагрузки он исчезнет.",
+                modal_reset_font_text: "Стандартный шрифт восстановлен.",
+                modal_sound_title: "Звук",
+                modal_sound_success: "Ваш звук успешно загружен!",
+                modal_sound_reset: "Звук сброшен на стандартный.",
+                modal_error_title: "Ошибка",
+                modal_docx_net_error: "Нужен интернет для создания DOCX!",
+                modal_pdf_net_error: "Нужен интернет для создания PDF!",
+                modal_reset_title: "Сброс редактора",
+                modal_reset_text: "Вы уверены? Это действие удалит текст и настройки. Приложение перезапустится.",
+                modal_clear_title: "Очистка текста",
+                modal_clear_text: "Вы точно хотите удалить весь текст без возможности восстановления?",
+
+                modal_btn_ok: "OK",
+                modal_btn_cool: "Круто!",
+                modal_btn_clear: "Очистить",
+                modal_btn_delete_all: "Удалить всё",
+                modal_btn_cancel: "Отмена",
+                modal_btn_understand: "Понятно",
+
+                // Achievements
+                ach_chars_1000_title: 'Разминка', ach_chars_1000_desc: 'Написать 1 000 символов',
+                ach_chars_5000_title: 'Поток мыслей', ach_chars_5000_desc: 'Написать 5 000 символов',
+                ach_chars_al_title: 'Авторский лист', ach_chars_al_desc: 'Написать 40 000 символов',
+                ach_chars_100k_title: 'Романист', ach_chars_100k_desc: 'Написать 100 000 символов',
+                ach_time_30m_title: 'Фокус', ach_time_30m_desc: 'Работать 30 минут без перерыва',
+                ach_time_1h_title: 'Погружение', ach_time_1h_desc: 'Работать 1 час непрерывно',
+                ach_time_3h_title: 'Машина', ach_time_3h_desc: 'Работать 3 часа непрерывно',
+                ach_custom_bg_title: 'Атмосфера', ach_custom_bg_desc: 'Поставить свой фон',
+                ach_custom_sound_title: 'Меломан', ach_custom_sound_desc: 'Поставить свои звуки клавиш',
+                ach_tg_sub_title: 'Сообщество', ach_tg_sub_desc: 'Перейти в ТГ-канал автора',
+                ach_unlocked_title: "Достижение разблокировано!",
+
+                // Tour
+                tour_welcome_title: "Центр управления",
+                tour_welcome_text: "Главное меню. Сохраняйте файлы, меняйте темы и настраивайте атмосферу.",
+                tour_achievements_title: "Достижения",
+                tour_achievements_text: "Здесь отображается ваш прогресс: количество символов, время работы и другие награды.",
+                tour_fs_title: "Полноэкранный режим",
+                tour_fs_text: "Нажмите, чтобы развернуть редактор на весь экран. Нажмите ESC, чтобы выйти.",
+                tour_save_title: "Автосохранение",
+                tour_save_text: "При вводе текста, внизу экрана появляется значок дискеты. Это значит, что текст был сохранён в кэш и никуда не денется при перезагрузке страницы.",
+                tour_width_title: "Типографика",
+                tour_width_text: "Настраивайте ширину поля для ввода текста.",
+                tour_title_title: "Название файла",
+                tour_title_text: "Имя вашего шедевра. Важно: Пока это поле пусто — сохранить файл не получится.",
+                tour_parallax_title: "Параллакс",
+                tour_parallax_text: "Эффект движения фона.",
+                tour_crt_title: "CRT Эффект",
+                tour_crt_text: "Ламповая атмосфера старого монитора.",
+                tour_sound_title: "Звук",
+                tour_sound_text: "Добавьте кастомные звуки при нажатии на клавиши.",
+                tour_lang_title: "Язык / Language",
+                tour_lang_text: "Вы можете переключить язык интерфейса прямо здесь, в настройках."
+            },
+            en: {
+                // UI Static
+                settings_lang: "Language / Язык",
+                sidebar_file: "File",
+                sidebar_text: "Text",
+                sidebar_appearance: "Appearance",
+                sidebar_audio: "Audio",
+
+                btn_open: "Open",
+                btn_save_txt: "TXT",
+                btn_save_docx: "DOCX",
+                btn_save_pdf: "PDF",
+                btn_clear: "Clear",
+                btn_font: "Font",
+
+                label_line_width: "Line Width:",
+                label_font_size: "Font Size:",
+                label_atmosphere: "Atmosphere:",
+                label_blur: "Blur:",
+                label_volume: "Volume:",
+
+                btn_photo: "Photo",
+                btn_parallax_on: "Parallax: On",
+                btn_parallax_off: "Parallax: Off",
+                btn_crt: "CRT Effect",
+                btn_sound_on: "Sound: On",
+                btn_sound_off: "Sound: Off",
+                btn_custom_sound: "Custom",
+
+                btn_reset: "Reset App",
+                footer_made_by: "Made by Danila Sudaev", // Leave name as is or transliterate? usually names are standard.
+
+                sidebar_achievements: "My Progress",
+
+                // Placeholders
+                ph_doc_title: "Document title...",
+                ph_editor: "Start writing...",
+
+                // Stats
+                stat_words: "words",
+                stat_chars: "chars",
+                stat_chars_ns: "chars (no sp)",
+                stat_sheets: "pages",
+
+                // Modals
+                modal_font_title: "Font",
+                modal_font_success: "Your font has been successfully installed!",
+                modal_font_storage_limit: "Font installed, but it's too large to save in browser. It will disappear after reload.",
+                modal_reset_font_text: "Default font restored.",
+                modal_sound_title: "Sound",
+                modal_sound_success: "Your sound has been successfully loaded!",
+                modal_sound_reset: "Sound reset to default.",
+                modal_error_title: "Error",
+                modal_docx_net_error: "Internet required to create DOCX!",
+                modal_pdf_net_error: "Internet required to create PDF!",
+                modal_reset_title: "Reset Editor",
+                modal_reset_text: "Are you sure? This will delete all text and settings. The app will restart.",
+                modal_clear_title: "Clear Text",
+                modal_clear_text: "Are you sure you want to delete all text permanently?",
+
+                modal_btn_ok: "OK",
+                modal_btn_cool: "Cool!",
+                modal_btn_clear: "Clear",
+                modal_btn_delete_all: "Delete All",
+                modal_btn_cancel: "Cancel",
+                modal_btn_understand: "Understood",
+
+                // Achievements
+                ach_chars_1000_title: 'Warm Up', ach_chars_1000_desc: 'Type 1,000 characters',
+                ach_chars_5000_title: 'Flow State', ach_chars_5000_desc: 'Type 5,000 characters',
+                ach_chars_al_title: 'Author Sheet', ach_chars_al_desc: 'Type 40,000 characters',
+                ach_chars_100k_title: 'Novelist', ach_chars_100k_desc: 'Type 100,000 characters',
+                ach_time_30m_title: 'Focus', ach_time_30m_desc: 'Work 30 minutes without break',
+                ach_time_1h_title: 'Deep Dive', ach_time_1h_desc: 'Work 1 hour continuously',
+                ach_time_3h_title: 'Machine', ach_time_3h_desc: 'Work 3 hours continuously',
+                ach_custom_bg_title: 'Atmosphere', ach_custom_bg_desc: 'Set a custom background',
+                ach_custom_sound_title: 'Audiophile', ach_custom_sound_desc: 'Set custom keyboard sounds',
+                ach_tg_sub_title: 'Community', ach_tg_sub_desc: 'Visit author\'s TG channel',
+                ach_unlocked_title: "Achievement Unlocked!",
+
+                // Tour
+                tour_welcome_title: "Control Center",
+                tour_welcome_text: "Main menu. Save files, change themes and adjust the atmosphere.",
+                tour_achievements_title: "Achievements",
+                tour_achievements_text: "Track your progress here: character count, session time and other rewards.",
+                tour_fs_title: "Fullscreen Mode",
+                tour_fs_text: "Click to expand editor to full screen. Press ESC to exit.",
+                tour_save_title: "Autosave",
+                tour_save_text: "When typing, a floppy disk icon appears at the bottom. This means text is saved to cache and won't be lost on reload.",
+                tour_width_title: "Typography",
+                tour_width_text: "Adjust the text input field width.",
+                tour_title_title: "Filename",
+                tour_title_text: "Name your masterpiece. Important: You cannot save the file while this field is empty.",
+                tour_parallax_title: "Parallax",
+                tour_parallax_text: "Background motion effect.",
+                tour_crt_title: "CRT Effect",
+                tour_crt_text: "Old monitor tube atmosphere.",
+                tour_sound_title: "Sound",
+                tour_sound_text: "Add custom sounds for keystrokes.",
+                tour_lang_title: "Language / Язык",
+                tour_lang_text: "You can switch interface language right here in settings."
+            }
+        };
+
+        let currentLang = localStorage.getItem('zenLang') || 'ru';
+
+        function t(key) {
+            return translations[currentLang][key] || key;
+        }
+
+        function setLanguage(lang) {
+            currentLang = lang;
+            localStorage.setItem('zenLang', lang);
+
+            // Update Toggle Buttons
+            document.querySelectorAll('.toggle-btn').forEach(btn => {
+                if (btn.id === 'btn-' + lang) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+
+            // Update Static UI
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (translations[lang][key]) {
+                    el.innerText = translations[lang][key];
+                }
+            });
+
+            // Update Placeholders
+            document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+                const key = el.getAttribute('data-i18n-placeholder');
+                if (translations[lang][key]) {
+                    el.setAttribute('placeholder', translations[lang][key]);
+                }
+            });
+
+            // Update Dynamic Texts (that aren't just static keys)
+            updateDynamicText();
+            updateStats();
+            renderAchievements();
+        }
+
+        function updateDynamicText() {
+            // Parallax Button
+            const pBtn = document.getElementById('parallaxText');
+            if (pBtn) pBtn.innerText = parallaxEnabled ? t('btn_parallax_on') : t('btn_parallax_off');
+
+            // Sound Button
+            const sBtn = document.getElementById('soundBtn');
+            if (sBtn) {
+                // Keep icon
+                const icon = soundEnabled ? iconSoundOn.split(' svg')[0] : iconSoundOff.split(' svg')[0];
+                // Actually the icon variable contains the whole svg string + text, we need to reconstruct it
+                // Let's just fix the toggleSound function to use t() as well
+                sBtn.innerHTML = (soundEnabled ?
+                    '<svg class="icon" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg> ' :
+                    '<svg class="icon" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg> ')
+                    + (soundEnabled ? t('btn_sound_on') : t('btn_sound_off'));
+            }
+
+            // CRT Button
+            const cBtn = document.getElementById('crtText');
+            if (cBtn) cBtn.innerText = t('btn_crt');
+
+            // Tour?
+            // Tour text is updated when shown
+        }
+
+        // ========================
+
+        // === CUSTOM MODAL SYSTEM ===
+        const modalOverlay = document.getElementById('custom-modal-overlay');
+        const modalTitle = document.getElementById('modal-title');
+        const modalMessage = document.getElementById('modal-message');
+        const modalButtons = document.getElementById('modal-buttons');
+
+        function showModal(title, message, buttons = []) {
+            modalTitle.innerText = title;
+            modalMessage.innerText = message;
+            modalButtons.innerHTML = '';
+
+            // Default button if none provided
+            if (buttons.length === 0) {
+                buttons.push({ text: 'OK', action: closeModal, primary: true });
+            }
+
+            buttons.forEach(btn => {
+                const button = document.createElement('button');
+                button.className = `modal-btn ${btn.primary ? 'primary' : ''} ${btn.danger ? 'danger' : ''}`;
+                button.innerText = btn.text;
+                button.onclick = () => {
+                    if (btn.action) btn.action();
+                    closeModal();
+                };
+                modalButtons.appendChild(button);
+            });
+
+            modalOverlay.classList.add('active');
+            playSystemSound('ding');
+        }
+
+        function closeModal() {
+            modalOverlay.classList.remove('active');
+        }
+
+        // Close on overlay click
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) closeModal();
+        });
+        const docTitleInput = document.getElementById('docTitleInput');
+        const sidebar = document.getElementById('sidebar');
+        const gearBtn = document.getElementById('gearBtn');
+
+        // Elements for Achievements
+        const achievementsSidebar = document.getElementById('achievements-sidebar');
+        const achievementsBtn = document.getElementById('achievementsBtn');
+        const toastContainer = document.getElementById('toast-container');
+        const achievementsList = document.getElementById('achievements-list');
+
+        const fsBtn = document.getElementById('fsBtn');
+        const soundEnabledBtn = document.getElementById('soundBtn');
+        const volRange = document.getElementById('volRange');
+        const blurRange = document.getElementById('blurRange');
+        const splash = document.getElementById('splash-screen');
+        const loadingBar = document.getElementById('loadingBar');
+        const parallaxBtn = document.getElementById('parallaxBtn');
+        const parallaxText = document.getElementById('parallaxText');
+        const crtBtn = document.getElementById('crtBtn');
+
+        const widthRange = document.getElementById('widthRange');
+        const fontInput = document.getElementById('fontInput');
+        const fontSizeRange = document.getElementById('fontSizeRange');
+
+        const wordCountSpan = document.getElementById('wordCount');
+        const charCountSpan = document.getElementById('charCount');
+        const charNoSpaceSpan = document.getElementById('charNoSpaceCount');
+        const sheetCountSpan = document.getElementById('sheetCount');
+        const saveIcon = document.getElementById('save-icon');
+
+        const iconSoundOn = '<svg class="icon" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg> Звук: Вкл';
+        const iconSoundOff = '<svg class="icon" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg> Звук: Выкл';
+
+        let soundEnabled = true; let globalVolume = 0.5; let customAudioBuffer = null; let lastSource = null; const REPEAT_DELAY = 90; let lastPlayTime = 0; const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        let parallaxEnabled = true;
+        let crtEnabled = false;
+        let saveTimeout;
+
+        /* --- TYPING ANIMATION (BEFOREINPUT) --- */
+        editor.addEventListener('beforeinput', (e) => {
+            if (e.inputType === 'insertText' && e.data) {
+                e.preventDefault();
+                const char = e.data;
+                const span = `<span class="char-anim">${char}</span>`;
+                document.execCommand('insertHTML', false, span);
+                triggerSave();
+                updateStats();
+            } else if (e.inputType === 'insertParagraph') {
+                // Let default behavior handle newlines
+            } else {
+                setTimeout(() => { triggerSave(); updateStats(); }, 0);
+            }
+        });
+
+        // Also update on 'prevents'
+        editor.addEventListener('input', () => {
+            triggerSave();
+            updateStats();
+        });
+
+        /* --- SOUND SYNTHESIZER FOR UI --- */
+        function playSystemSound(type) {
+            // Проверяем только включен ли звук вообще
+            if (!soundEnabled) return;
+
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            if (type === 'ding') {
+                // --- ЗВУК АЧИВКИ (ДИНЬ) ---
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+
+                // ГРОМКОСТЬ: Снижена до 0.01 (было 0.04)
+                const vol = 0.01 * globalVolume;
+                gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
+
+                osc.start();
+                osc.stop(audioCtx.currentTime + 1.5);
+
+            } else if (type === 'click') {
+                // --- ЗВУК ЩЕЛЧКА ---
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.08);
+
+                // ГРОМКОСТЬ: Снижена до 0.015 (было 0.05)
+                const vol = 0.015 * globalVolume;
+                gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.08);
+            }
+        }
+
+        /* --- ICONS LIBRARY (SVG STRINGS) --- */
+        const Icons = {
+            feather: '<svg class="icon" viewBox="0 0 24 24"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"></path><line x1="16" y1="8" x2="2" y2="22"></line><line x1="17.5" y1="15" x2="9" y2="15"></line></svg>',
+            book: '<svg class="icon" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>',
+            flame: '<svg class="icon" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.1.2-2.2.6-3.3.7 2.1 1.7 3.3 2.9 3.8z"></path></svg>',
+            clock: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>',
+            image: '<svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>',
+            speaker: '<svg class="icon" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>',
+            send: '<svg class="icon" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
+            target: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>'
+        };
+
+        /* --- ACHIEVEMENTS SYSTEM DATA & LOGIC --- */
+        const achievementsData = [
+            { id: 'chars_1000', icon: Icons.feather, threshold: 1000, type: 'chars' },
+            { id: 'chars_5000', icon: Icons.book, threshold: 5000, type: 'chars' },
+            { id: 'chars_al', icon: Icons.book, threshold: 40000, type: 'chars' },
+            { id: 'chars_100k', icon: Icons.flame, threshold: 100000, type: 'chars' },
+            { id: 'time_30m', icon: Icons.target, threshold: 30, type: 'time' },
+            { id: 'time_1h', icon: Icons.clock, threshold: 60, type: 'time' },
+            { id: 'time_3h', icon: Icons.clock, threshold: 180, type: 'time' },
+            { id: 'custom_bg', icon: Icons.image, type: 'manual' },
+            { id: 'custom_sound', icon: Icons.speaker, type: 'manual' },
+            { id: 'tg_sub', icon: Icons.send, type: 'manual' }
+        ];
+
+        let unlockedAchievements = JSON.parse(localStorage.getItem('aurora_achievements')) || [];
+        let sessionMinutes = 0;
+
+        function renderAchievements() {
+            achievementsList.innerHTML = '';
+            achievementsData.forEach(ach => {
+                const isUnlocked = unlockedAchievements.includes(ach.id);
+                // Construct keys dynamically
+                const title = t('ach_' + ach.id + '_title');
+                const desc = t('ach_' + ach.id + '_desc');
+
+                const card = document.createElement('div');
+                card.className = `achievement-card ${isUnlocked ? 'unlocked' : ''}`;
+                card.innerHTML = `
+                    <div class="achievement-icon">${ach.icon}</div>
+                    <div class="achievement-info">
+                        <h4>${title}</h4>
+                        <p>${desc}</p>
+                    </div>
+                `;
+                achievementsList.appendChild(card);
+            });
+        }
+
+        function showToast(title, iconSVG) {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = `
+                <div class="toast-icon">${iconSVG}</div>
+                <div class="toast-content">
+                    <h4>${t('ach_unlocked_title')}</h4>
+                    <p>${title}</p>
+                </div>
+            `;
+            toastContainer.appendChild(toast);
+
+            const svg = toast.querySelector('svg');
+            if (svg) svg.style.stroke = 'var(--gold-color)';
+
+            setTimeout(() => { toast.remove(); }, 4000);
+        }
+
+        function unlockAchievement(id) {
+            if (!unlockedAchievements.includes(id)) {
+                const ach = achievementsData.find(a => a.id === id);
+                if (ach) {
+                    unlockedAchievements.push(id);
+                    localStorage.setItem('aurora_achievements', JSON.stringify(unlockedAchievements));
+                    renderAchievements();
+                    // Get translated title for toast
+                    const title = t('ach_' + ach.id + '_title');
+                    showToast(title, ach.icon);
+                    playSystemSound('ding'); // Звук Динь
+                }
+            }
+        }
+
+        // Time Check
+        setInterval(() => {
+            sessionMinutes++;
+            achievementsData.filter(a => a.type === 'time').forEach(ach => {
+                if (sessionMinutes >= ach.threshold) unlockAchievement(ach.id);
+            });
+        }, 60000);
+
+        function toggleAchievements() {
+            // Закрыть левый сайдбар, если открыт
+            sidebar.classList.remove('active');
+            gearBtn.classList.remove('moved');
+
+            const isActive = achievementsSidebar.classList.toggle('active');
+            achievementsBtn.classList.toggle('moved');
+
+            if (isActive) {
+                fsBtn.classList.add('moved-left');
+            } else {
+                fsBtn.classList.remove('moved-left');
+            }
+        }
+
+        /* --- END ACHIEVEMENTS LOGIC --- */
+
+        function triggerSave() {
+            saveIcon.classList.add('visible');
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                saveIcon.classList.remove('visible');
+                localStorage.setItem('zenText', editor.innerHTML);
+            }, 2000);
+        }
+
+        fontSizeRange.addEventListener('input', (e) => {
+            const val = e.target.value;
+            document.documentElement.style.setProperty('--font-size', val + 'px');
+            localStorage.setItem('zenFontSize', val);
+        });
+
+        widthRange.addEventListener('input', (e) => {
+            const val = e.target.value;
+            document.documentElement.style.setProperty('--content-width', val + 'px');
+            localStorage.setItem('zenWidth', val);
+        });
+
+        const defaultFont = "'Courier New', Courier, monospace";
+        fontInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const fontData = ev.target.result;
+                loadCustomFont(fontData);
+                try {
+                    localStorage.setItem('zenFontData', fontData);
+                    showModal(t('modal_font_title'), t('modal_font_success'), [{ text: t('modal_btn_cool'), primary: true }]);
+                }
+                catch (err) {
+                    showModal(t('modal_error_title'), t('modal_font_storage_limit'), [{ text: t('modal_btn_understand') }]);
+                }
+            };
+            reader.readAsDataURL(file);
+            e.target.value = '';
+        });
+
+        function loadCustomFont(base64Data) {
+            const customFont = new FontFace('UserCustomFont', `url(${base64Data})`);
+            customFont.load().then((loadedFace) => {
+                document.fonts.add(loadedFace);
+                document.documentElement.style.setProperty('--editor-font', 'UserCustomFont');
+            }).catch(err => {
+                showModal(t('modal_error_title'), err);
+            });
+        }
+
+        function resetFont() {
+            document.documentElement.style.setProperty('--editor-font', defaultFont);
+            localStorage.removeItem('zenFontData');
+            showModal(t('modal_font_title'), t('modal_reset_font_text'), [{ text: 'OK', primary: true }]);
+        }
+
+        function updateStats() {
+            let text = editor.innerText;
+            // Fix for contenteditable adding a trailing newline
+            if (text.endsWith('\n')) {
+                text = text.slice(0, -1);
+            }
+
+            const words = text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
+            const chars = text.length;
+            const charsNoSpace = text.replace(/\s/g, '').length;
+            const sheets = (chars / 40000).toFixed(2);
+
+            wordCountSpan.innerText = `${words} ${t('stat_words')}`;
+            charCountSpan.innerText = `${chars} ${t('stat_chars')}`;
+            charNoSpaceSpan.innerText = `${charsNoSpace} ${t('stat_chars_ns')}`;
+            sheetCountSpan.innerText = `${sheets} ${t('stat_sheets')}`;
+
+            // Check Achievements
+            achievementsData.filter(a => a.type === 'chars').forEach(ach => {
+                if (chars >= ach.threshold) unlockAchievement(ach.id);
+            });
+        }
+
+        document.addEventListener('mousemove', (e) => {
+            if (!parallaxEnabled) return;
+            const moveX = (e.clientX - window.innerWidth / 2) * -0.01;
+            const moveY = (e.clientY - window.innerHeight / 2) * -0.01;
+            document.body.style.setProperty('--move-x', moveX + 'px');
+            document.body.style.setProperty('--move-y', moveY + 'px');
+        });
+
+        function toggleParallax() {
+            parallaxEnabled = !parallaxEnabled;
+            parallaxBtn.classList.toggle('active', parallaxEnabled);
+            parallaxText.innerText = parallaxEnabled ? t('btn_parallax_on') : t('btn_parallax_off');
+            if (!parallaxEnabled) { document.body.style.setProperty('--move-x', '0px'); document.body.style.setProperty('--move-y', '0px'); }
+        }
+
+        function toggleCRT() {
+            crtEnabled = !crtEnabled;
+            crtBtn.classList.toggle('active', crtEnabled);
+            document.body.classList.toggle('crt-active', crtEnabled);
+            localStorage.setItem('zenCrt', crtEnabled);
+            // We need to update text here too if we want it to react to lang changes?
+            // Actually setLanguage handles the update, here we just toggle
+            // But if text is static "CRT Effect", we just rely on data-i18n?
+            // Oh wait, in my dynamic update I set it.
+            // But let's check `toggleCRT` implementation. It doesn't update text. Good.
+            // Wait, my JS earlier:
+            // const cBtn = document.getElementById('crtText');
+            // if (cBtn) cBtn.innerText = t('btn_crt');
+            // Okay.
+        }
+
+        // === KEYDOWN EVENTS ===
+        editor.addEventListener('keydown', (e) => {
+            const now = Date.now();
+
+            // Звук
+            if ((!e.repeat || (now - lastPlayTime > REPEAT_DELAY)) && (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Enter')) {
+                playKeySound(); lastPlayTime = now;
+            }
+
+            // Табуляция
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                document.execCommand('insertText', false, "    ");
+            }
+        });
+
+        const tourSteps = [
+            { id: 'gearBtn', key: 'tour_welcome' },
+            { id: 'achievementsBtn', key: 'tour_achievements' },
+            { id: 'fsBtn', key: 'tour_fs' },
+            { id: 'save-icon', key: 'tour_save' },
+            { id: 'widthRange', key: 'tour_width' },
+            { id: 'docTitleInput', key: 'tour_title' },
+            { id: 'parallaxBtn', key: 'tour_parallax' },
+            { id: 'crtBtn', key: 'tour_crt' },
+            { id: 'soundBtn', key: 'tour_sound' },
+            // Added Language Step? The user didn't ask for it but good for completeness.
+            // But existing array implies step by step.
+            // I'll stick to what was there + Lang if I can fit it?
+            // The original list had 9 steps.
+            { id: 'btn-ru', key: 'tour_lang' } // Let's add it.
+        ];
+        let currentStep = 0;
+
+        function checkTour() { if (!localStorage.getItem('aurora_tour_done')) setTimeout(startTour, 1000); }
+        function startTour() { document.getElementById('tour-overlay').classList.add('active'); document.getElementById('tour-tooltip').classList.add('active'); sidebar.classList.add('tour-mode-active'); showStep(0); }
+        function showStep(index) {
+            currentStep = index; const step = tourSteps[index]; const target = document.getElementById(step.id);
+            if ((step.id === 'docTitleInput' || step.id === 'parallaxBtn' || step.id === 'soundBtn' || step.id === 'widthRange' || step.id === 'crtBtn' || step.id === 'btn-ru') && !sidebar.classList.contains('active')) toggleSidebar();
+
+            document.querySelectorAll('.tour-highlight').forEach(el => el.classList.remove('tour-highlight'));
+            if (target) target.classList.add('tour-highlight'); // Safety check if target exists
+
+            document.getElementById('tour-title').innerText = t(step.key + '_title');
+            document.getElementById('tour-desc').innerText = t(step.key + '_text');
+
+            document.getElementById('tour-counter').innerText = `${index + 1} / ${tourSteps.length}`;
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        function nextTourStep() { if (currentStep < tourSteps.length - 1) showStep(currentStep + 1); else endTour(); }
+        function endTour() { document.getElementById('tour-overlay').classList.remove('active'); document.getElementById('tour-tooltip').classList.remove('active'); document.querySelectorAll('.tour-highlight').forEach(el => el.classList.remove('tour-highlight')); sidebar.classList.remove('tour-mode-active'); if (sidebar.classList.contains('active')) toggleSidebar(); localStorage.setItem('aurora_tour_done', 'true'); }
+
+        function resetApp() {
+            showModal(t('modal_reset_title'), t('modal_reset_text'), [
+                {
+                    text: t('modal_btn_delete_all'),
+                    danger: true,
+                    action: () => {
+                        localStorage.clear();
+                        location.reload();
+                    }
+                },
+                { text: t('modal_btn_cancel'), primary: true }
+            ]);
+        }
+
+        window.onload = function () {
+            setLanguage(currentLang); // Initialize Language
+
+            const savedBgImg = localStorage.getItem('zenBg');
+            const savedSolidColor = localStorage.getItem('zenSolidColor');
+            if (savedBgImg) setBackgroundImage(savedBgImg);
+            else if (savedSolidColor) { setSolidBackground(savedSolidColor); if (savedSolidColor.startsWith('#')) document.getElementById('colorPicker').value = savedSolidColor; }
+
+            // Loading sequence
+            setTimeout(() => { loadingBar.style.width = "100%"; }, 100);
+            setTimeout(() => {
+                splash.classList.add('hidden');
+                setTimeout(checkTour, 500); // Check tour directly
+            }, 1500);
+
+            const savedText = localStorage.getItem('zenText');
+            if (savedText) editor.innerHTML = savedText; // Load HTML to preserve spans
+            const savedTitle = localStorage.getItem('zenTitle'); if (savedTitle) docTitleInput.value = savedTitle;
+            const savedBlur = localStorage.getItem('zenBlur'); if (savedBlur !== null) { blurRange.value = savedBlur; document.documentElement.style.setProperty('--blur-amount', savedBlur + 'px'); }
+            const savedSoundBase64 = localStorage.getItem('zenSoundData'); if (savedSoundBase64) decodeSound(savedSoundBase64);
+            const savedVol = localStorage.getItem('zenVolume'); if (savedVol !== null) { globalVolume = parseFloat(savedVol); volRange.value = globalVolume; }
+            const savedWidth = localStorage.getItem('zenWidth'); if (savedWidth) { widthRange.value = savedWidth; document.documentElement.style.setProperty('--content-width', savedWidth + 'px'); }
+            const savedFontSize = localStorage.getItem('zenFontSize'); if (savedFontSize) { fontSizeRange.value = savedFontSize; document.documentElement.style.setProperty('--font-size', savedFontSize + 'px'); }
+            const savedFontData = localStorage.getItem('zenFontData'); if (savedFontData) { loadCustomFont(savedFontData); }
+
+            // CRT Init
+            const savedCrt = localStorage.getItem('zenCrt');
+            if (savedCrt === 'true') {
+                crtEnabled = true;
+                crtBtn.classList.add('active');
+                document.body.classList.add('crt-active');
+            }
+
+            // ADD CLICK SOUND LISTENERS
+            const clickTargets = document.querySelectorAll('button, .color-btn, .rainbow-wrapper, .close-btn');
+            clickTargets.forEach(btn => {
+                btn.addEventListener('click', () => playSystemSound('click'));
+            });
+
+            renderAchievements();
+            updateStats();
+        };
+
+        docTitleInput.addEventListener('input', () => { localStorage.setItem('zenTitle', docTitleInput.value); docTitleInput.classList.remove('error'); });
+        function validateTitle() { const title = docTitleInput.value.trim(); if (!title) { docTitleInput.classList.add('error'); sidebar.style.animation = "shake 0.3s"; setTimeout(() => sidebar.style.animation = "", 300); return null; } return title; }
+
+        function setSolidBackground(bgStyle) {
+            document.documentElement.style.setProperty('--bg-current', bgStyle);
+            localStorage.setItem('zenSolidColor', bgStyle);
+            localStorage.removeItem('zenBg');
+            // unlockAchievement('custom_bg'); // REMOVED: Only for image upload now
+        }
+
+        function setBackgroundImage(imageData) { document.documentElement.style.setProperty('--bg-current', `url(${imageData})`); }
+
+        document.getElementById('bgInput').addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function (evt) {
+                    try {
+                        localStorage.setItem('zenBg', evt.target.result);
+                        localStorage.removeItem('zenSolidColor');
+                        setBackgroundImage(evt.target.result);
+                        unlockAchievement('custom_bg');
+                    } catch (err) {
+                        setBackgroundImage(evt.target.result);
+                    }
+                }
+                reader.readAsDataURL(file); e.target.value = '';
+            }
+        });
+
+        document.getElementById('txtInput').addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const fileName = file.name.replace(/\.[^/.]+$/, "");
+            docTitleInput.value = fileName; localStorage.setItem('zenTitle', fileName);
+            const reader = new FileReader();
+            if (file.name.endsWith('.docx')) {
+                reader.onload = function (event) { mammoth.extractRawText({ arrayBuffer: event.target.result }).then(function (result) { editor.value = result.value; localStorage.setItem('zenText', editor.value); updateStats(); }).catch(function (err) { showModal('Ошибка', err.message); }); };
+                reader.readAsArrayBuffer(file);
+            } else {
+                reader.onload = function (ev) { editor.value = ev.target.result; localStorage.setItem('zenText', editor.value); updateStats(); };
+                reader.readAsText(file);
+            }
+            e.target.value = '';
+        });
+
+        function savePDF() {
+            const title = validateTitle();
+            if (!title) return;
+            if (typeof html2pdf === 'undefined') {
+                showModal(t('modal_error_title'), t('modal_pdf_net_error'), [{ text: t('modal_btn_understand'), primary: true }]);
+                return;
+            }
+
+            const element = document.createElement('div');
+            // Preserve whitespace and newlines
+            element.innerHTML = editor.innerHTML;
+            // Apply styles
+            element.innerHTML = editor.innerHTML;
+            // Apply styles
+            element.style.fontFamily = getComputedStyle(document.documentElement).getPropertyValue('--editor-font');
+            element.style.fontSize = "12pt";
+            element.style.fontSize = "12pt";
+            element.style.lineHeight = "1.5";
+            element.style.padding = '20px';
+            element.style.color = '#000';
+            element.style.background = '#fff';
+
+            const opt = {
+                margin: 10,
+                filename: title + '.pdf',
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2 },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            html2pdf().set(opt).from(element).save();
+        }
+
+        function saveDocx() {
+            const title = validateTitle();
+            if (!title) return;
+            if (typeof docx === 'undefined') {
+                showModal(t('modal_error_title'), t('modal_docx_net_error'), [{ text: t('modal_btn_understand'), primary: true }]);
+                return;
+            }
+            const text = editor.innerText;
+            const lines = text.split('\n');
+            const docChildren = lines.map(line => new docx.Paragraph({ children: [new docx.TextRun({ text: line, font: "Calibri", size: 24 })], spacing: { after: 120 } }));
+            const doc = new docx.Document({ sections: [{ children: docChildren }] });
+            docx.Packer.toBlob(doc).then(blob => {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = title + ".docx";
+                link.click();
+            });
+        }
+        function saveFile() { const title = validateTitle(); if (!title) return; const b = new Blob([editor.innerText], { type: 'text/plain' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = title + ".txt"; a.click(); }
+
+        function toggleFullScreen() { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else if (document.exitFullscreen) document.exitFullscreen(); }
+        document.addEventListener('fullscreenchange', () => { fsBtn.innerHTML = document.fullscreenElement ? '<svg class="icon" viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>' : '<svg class="icon" viewBox="0 0 24 24"><path d="M15 3h6v6"></path><path d="M9 21H3v-6"></path><path d="M21 3l-7 7"></path><path d="M3 21l7-7"></path></svg>'; });
+
+        function toggleSidebar() {
+            // Закрыть правый сайдбар, если открыт
+            achievementsSidebar.classList.remove('active');
+            achievementsBtn.classList.remove('moved');
+            fsBtn.classList.remove('moved-left');
+
+            sidebar.classList.toggle('active');
+            gearBtn.classList.toggle('moved');
+        }
+
+        // Глобальный клик для закрытия
+        editor.addEventListener('click', function () {
+            if (sidebar.classList.contains('active')) {
+                sidebar.classList.remove('active');
+                gearBtn.classList.remove('moved');
+            }
+            if (achievementsSidebar.classList.contains('active')) {
+                achievementsSidebar.classList.remove('active');
+                achievementsBtn.classList.remove('moved');
+                fsBtn.classList.remove('moved-left');
+            }
+        });
+
+        blurRange.addEventListener('input', function (e) { const val = e.target.value; document.documentElement.style.setProperty('--blur-amount', val + 'px'); localStorage.setItem('zenBlur', val); });
+
+        volRange.addEventListener('input', function (e) { globalVolume = parseFloat(e.target.value); localStorage.setItem('zenVolume', globalVolume); if (!soundEnabled && globalVolume > 0) { soundEnabled = true; soundEnabledBtn.innerHTML = iconSoundOn; } });
+        function decodeSound(base64Data) { fetch(base64Data).then(r => r.arrayBuffer()).then(b => audioCtx.decodeAudioData(b)).then(d => { customAudioBuffer = d; }).catch(console.error); }
+        function playKeySound() { if (!soundEnabled || globalVolume <= 0) return; if (audioCtx.state === 'suspended') audioCtx.resume(); if (lastSource) { try { lastSource.stop(); } catch (e) { } } const gainNode = audioCtx.createGain(); gainNode.connect(audioCtx.destination); if (customAudioBuffer) { const source = audioCtx.createBufferSource(); source.buffer = customAudioBuffer; gainNode.gain.value = globalVolume; source.connect(gainNode); source.playbackRate.value = 0.95 + Math.random() * 0.1; source.start(0); lastSource = source; } else { const oscillator = audioCtx.createOscillator(); oscillator.type = 'triangle'; oscillator.frequency.setValueAtTime(100, audioCtx.currentTime); oscillator.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.1); const synthVol = 0.15 * globalVolume; gainNode.gain.setValueAtTime(synthVol, audioCtx.currentTime); gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1); oscillator.connect(gainNode); oscillator.start(); oscillator.stop(audioCtx.currentTime + 0.1); lastSource = oscillator; } }
+        function toggleSound() { soundEnabled = !soundEnabled; updateDynamicText(); /*soundEnabledBtn.innerHTML updated in dynamicText*/ }
+        function resetCustomSound() {
+            customAudioBuffer = null;
+            localStorage.removeItem('zenSoundData');
+            showModal(t('modal_sound_title'), t('modal_sound_reset'), [{ text: 'OK', primary: true }]);
+        }
+        document.getElementById('soundInput').addEventListener('change', function (e) {
+            const file = e.target.files[0]; if (!file) return;
+            const reader = new FileReader(); reader.onload = function (evt) {
+                const base64 = evt.target.result;
+                try { localStorage.setItem('zenSoundData', base64); decodeSound(base64); showModal(t('modal_sound_title'), t('modal_sound_success'), [{ text: t('modal_btn_cool'), primary: true }]); unlockAchievement('custom_sound'); /* Achievement Trigger */ }
+                catch (err) { decodeSound(base64); }
+            };
+            reader.readAsDataURL(file);
+        });
+
+        editor.addEventListener('input', function () {
+            // Handled by beforeinput primarily, but safe to keep
+            updateStats();
+            triggerSave();
+        });
+
+        function clearText() {
+            showModal(t('modal_clear_title'), t('modal_clear_text'), [
+                {
+                    text: t('modal_btn_clear'),
+                    danger: true,
+                    action: () => {
+                        editor.innerHTML = '';
+                        localStorage.removeItem('zenText');
+                        updateStats();
+                    }
+                },
+                { text: t('modal_btn_cancel'), primary: true }
+            ]);
+        }
+
+        // Link Telegram Trigger
+        document.getElementById('tg-link').addEventListener('click', () => unlockAchievement('tg_sub'));
+
+
+
+    </script>
+</body>
+
+</html>
